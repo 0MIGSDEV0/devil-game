@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DEVIL PLATFORM</title>
+    <title>DEVIL FPS</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: #000;
-            color: #ff3333;
-            font-family: 'Consolas', 'Courier New', monospace;
+            color: #ff2222;
+            font-family: 'Consolas', monospace;
             overflow: hidden;
             height: 100vh;
             display: flex;
@@ -18,29 +18,55 @@
             position: relative;
         }
         canvas {
-            border: 6px solid #660000;
-            box-shadow: 0 0 40px #cc0000;
+            border: 8px solid #440000;
+            box-shadow: 0 0 50px #ff0000,
+                        inset 0 0 80px #880000;
             image-rendering: pixelated;
         }
         #hud {
             position: absolute;
             top: 20px;
             left: 30px;
-            font-size: 28px;
-            letter-spacing: 2px;
-            text-shadow: 0 0 15px #ff0000;
-            z-index: 10;
+            font-size: 32px;
+            text-shadow: 0 0 20px #ff0000;
+            z-index: 100;
+            pointer-events: none;
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 30px;
+            height: 30px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 100;
+        }
+        #crosshair::before, #crosshair::after {
+            content: '';
+            position: absolute;
+            background: #ff0000;
+            box-shadow: 0 0 10px #ff0000;
+        }
+        #crosshair::before {
+            width: 100%;
+            height: 2px;
+            top: 50%;
+        }
+        #crosshair::after {
+            height: 100%;
+            width: 2px;
+            left: 50%;
         }
         #title {
             position: absolute;
             top: 25px;
             left: 50%;
             transform: translateX(-50%);
-            font-size: 38px;
-            letter-spacing: 8px;
-            font-weight: bold;
-            text-shadow: 0 0 20px #ff0000;
-            z-index: 10;
+            font-size: 42px;
+            letter-spacing: 12px;
+            text-shadow: 0 0 30px #ff0000;
+            z-index: 100;
             pointer-events: none;
         }
         #game-over {
@@ -48,22 +74,22 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            font-size: 72px;
+            font-size: 80px;
             color: #ff0000;
-            text-shadow: 0 0 30px #ff0000;
+            text-shadow: 0 0 40px #ff0000;
             display: none;
             text-align: center;
-            line-height: 1.2;
-            z-index: 20;
+            z-index: 200;
         }
         #instructions {
             position: absolute;
-            bottom: 20px;
+            bottom: 25px;
             left: 50%;
             transform: translateX(-50%);
             font-size: 18px;
             color: #aa0000;
             text-shadow: 0 0 10px #ff0000;
+            z-index: 100;
         }
     </style>
 </head>
@@ -71,255 +97,367 @@
 
     <canvas id="canvas" width="1280" height="720"></canvas>
 
-    <div id="hud">MORTES: <span id="deathCount">0</span></div>
-    <div id="title">DEVIL PLATFORM</div>
-    
+    <div id="hud">
+        MORTES: <span id="kills">0</span> &nbsp;&nbsp;&nbsp; 
+        VIDA: <span id="health">100</span>
+    </div>
+    <div id="title">DEVIL FPS</div>
+    <div id="crosshair"></div>
+
     <div id="game-over">
-        VOCÊ FALHOU<br>
-        <span style="font-size: 32px;">PRESSIONE R PARA TENTAR NOVAMENTE</span>
+        VOCÊ FOI DEVORADO<br>
+        <span style="font-size:34px; display:block; margin-top:20px;">PRESSIONE R PARA RENASCER NO INFERNO</span>
     </div>
 
     <div id="instructions">
-        A/D ou ← → : Mover &nbsp;&nbsp;&nbsp; W / ESPAÇO : Pular (duplo)
+        WASD = mover • MOUSE = mirar • CLIQUE = atirar • ESC = pausar mira
     </div>
 
     <script>
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
-        
-        const deathCountEl = document.getElementById('deathCount');
+        const killsEl = document.getElementById('kills');
+        const healthEl = document.getElementById('health');
         const gameOverScreen = document.getElementById('game-over');
 
+        let WIDTH = 1280;
+        let HEIGHT = 720;
         let deaths = 0;
-        let gameState = 'playing'; // playing | dead
+        let kills = 0;
+        let health = 100;
+        let gameState = 'playing';
+
+        // ====================== MAPA (estilo inferno) ======================
+        const map = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,2,0,1,1,1,0,1,1,1,0,2,0,1],
+            [1,0,0,0,0,0,1,0,1,0,0,0,0,0,1],
+            [1,0,1,1,1,0,1,0,1,0,1,1,1,0,1],
+            [1,0,1,0,0,0,0,0,0,0,0,0,1,0,1],
+            [1,0,1,0,2,1,1,1,1,1,2,0,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
+        const MAP_SIZE = map[0].length;
+        const TILE_SIZE = 64;
 
         // ====================== JOGADOR ======================
         let player = {
-            x: 80,
-            y: 400,
-            width: 30,
-            height: 30,
-            velX: 0,
-            velY: 0,
-            speed: 6.5,
-            jump: -17,
-            gravity: 0.85,
-            onGround: false,
-            jumpsLeft: 2
+            x: TILE_SIZE * 1.5,
+            y: TILE_SIZE * 1.5,
+            angle: 0,
+            speed: 4,
+            rotSpeed: 0.08,
+            health: 100
         };
+
+        // ====================== INIMIGOS (demônios vermelhos) ======================
+        let enemies = [
+            {x: TILE_SIZE * 3.5, y: TILE_SIZE * 3.5, alive: true, size: 30},
+            {x: TILE_SIZE * 10.5, y: TILE_SIZE * 2.5, alive: true, size: 30},
+            {x: TILE_SIZE * 6.5, y: TILE_SIZE * 6.5, alive: true, size: 30},
+            {x: TILE_SIZE * 12.5, y: TILE_SIZE * 5.5, alive: true, size: 30}
+        ];
 
         // ====================== CONTROLES ======================
         const keys = {};
+        let mouseX = 0;
+        let isLocked = false;
+
         window.addEventListener('keydown', e => {
             keys[e.key.toLowerCase()] = true;
-            if ((e.key.toLowerCase() === 'r') && gameState === 'dead') resetLevel();
+            if (e.key.toLowerCase() === 'r' && gameState === 'dead') resetGame();
         });
-        window.addEventListener('keyup', e => {
-            keys[e.key.toLowerCase()] = false;
+        window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+        canvas.addEventListener('click', () => {
+            if (gameState === 'playing') {
+                if (!isLocked) {
+                    canvas.requestPointerLock();
+                } else {
+                    shoot();
+                }
+            }
         });
 
-        // ====================== NÍVEL ======================
-        let platforms = [
-            {x: 0,   y: 650, w: 850, h: 70},     // chão esquerdo
-            {x: 950, y: 650, w: 400, h: 70},     // chão direito
-            {x: 280, y: 520, w: 220, h: 18},
-            {x: 580, y: 410, w: 160, h: 18},
-            {x: 820, y: 300, w: 200, h: 18, temp: true, timer: 85}
-        ];
+        document.addEventListener('pointerlockchange', () => {
+            isLocked = document.pointerLockElement === canvas;
+        });
 
-        let spikes = [
-            {x: 380, y: 630, w: 60, h: 20},
-            {x: 720, y: 630, w: 60, h: 20},
-            {x: 1050, y: 630, w: 60, h: 20}
-        ];
+        document.addEventListener('mousemove', e => {
+            if (isLocked && gameState === 'playing') {
+                player.angle += e.movementX * 0.0035;
+            }
+        });
 
-        let collectible = {
-            x: 1050,
-            y: 220,
-            width: 28,
-            height: 38,
-            collected: false
-        };
+        // ====================== RAYCASTING ======================
+        function castRay(angle) {
+            let rayX = player.x;
+            let rayY = player.y;
+            let dx = Math.cos(angle);
+            let dy = Math.sin(angle);
 
-        function resetLevel() {
-            player.x = 80;
-            player.y = 400;
-            player.velX = 0;
-            player.velY = 0;
-            player.jumpsLeft = 2;
-            collectible.collected = false;
-            gameState = 'playing';
-            gameOverScreen.style.display = 'none';
+            for (let i = 0; i < 800; i++) {  // distância máxima
+                rayX += dx * 4;
+                rayY += dy * 4;
+
+                let mapX = Math.floor(rayX / TILE_SIZE);
+                let mapY = Math.floor(rayY / TILE_SIZE);
+
+                if (mapX < 0 || mapX >= MAP_SIZE || mapY < 0 || mapY >= MAP_SIZE) break;
+
+                if (map[mapY][mapX] > 0) {
+                    let dist = Math.sqrt((rayX - player.x) ** 2 + (rayY - player.y) ** 2);
+                    let side = (Math.floor(rayX / TILE_SIZE) !== Math.floor((rayX - dx * 4) / TILE_SIZE)) ? 1 : 2;
+                    return { dist, side, wallType: map[mapY][mapX] };
+                }
+            }
+            return { dist: 800, side: 1, wallType: 0 };
         }
 
-        // ====================== COLISÕES ======================
-        function rectCollision(a, b) {
-            return !(
-                a.x + a.width < b.x ||
-                a.x > b.x + b.w ||
-                a.y + a.height < b.y ||
-                a.y > b.y + b.h
-            );
+        // ====================== TIRO ======================
+        function shoot() {
+            // som de tiro (Web Audio)
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioCtx.createOscillator();
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(180, audioCtx.currentTime);
+            const gain = audioCtx.createGain();
+            gain.gain.value = 0.6;
+            gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.08);
+            oscillator.connect(gain).connect(audioCtx.destination);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.15);
+
+            // raycast central para tiro
+            const ray = castRay(player.angle);
+            
+            // verifica se acertou inimigo
+            for (let i = 0; i < enemies.length; i++) {
+                let e = enemies[i];
+                if (!e.alive) continue;
+
+                let dx = e.x - player.x;
+                let dy = e.y - player.y;
+                let dist = Math.sqrt(dx*dx + dy*dy);
+                let enemyAngle = Math.atan2(dy, dx);
+
+                if (Math.abs(enemyAngle - player.angle) < 0.2 && dist < ray.dist) {
+                    e.alive = false;
+                    kills++;
+                    killsEl.textContent = kills;
+                    
+                    // partículas de sangue
+                    createBlood(e.x, e.y);
+                    
+                    // se todos mortos = vitória
+                    if (enemies.every(en => !en.alive)) {
+                        setTimeout(() => alert("INFERNO CONQUISTADO! Você matou todos os demônios."), 300);
+                    }
+                    return;
+                }
+            }
+        }
+
+        // ====================== PARTÍCULAS DE SANGUE ======================
+        let particles = [];
+        function createBlood(x, y) {
+            for (let i = 0; i < 18; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 12,
+                    vy: (Math.random() - 0.5) * 12,
+                    life: 35,
+                    color: '#ff0000'
+                });
+            }
+        }
+
+        // ====================== MOVIMENTO ======================
+        function updatePlayer() {
+            let moveSpeed = keys['shift'] ? 6 : 4;
+            let dx = Math.cos(player.angle) * moveSpeed;
+            let dy = Math.sin(player.angle) * moveSpeed;
+
+            if (keys['w']) {
+                let newX = player.x + dx;
+                let newY = player.y + dy;
+                if (map[Math.floor(newY / TILE_SIZE)][Math.floor(newX / TILE_SIZE)] === 0) {
+                    player.x = newX;
+                    player.y = newY;
+                }
+            }
+            if (keys['s']) {
+                let newX = player.x - dx;
+                let newY = player.y - dy;
+                if (map[Math.floor(newY / TILE_SIZE)][Math.floor(newX / TILE_SIZE)] === 0) {
+                    player.x = newX;
+                    player.y = newY;
+                }
+            }
+            if (keys['a']) {
+                let strafeX = Math.cos(player.angle - Math.PI/2) * moveSpeed * 0.8;
+                let strafeY = Math.sin(player.angle - Math.PI/2) * moveSpeed * 0.8;
+                let newX = player.x + strafeX;
+                let newY = player.y + strafeY;
+                if (map[Math.floor(newY / TILE_SIZE)][Math.floor(newX / TILE_SIZE)] === 0) {
+                    player.x = newX;
+                    player.y = newY;
+                }
+            }
+            if (keys['d']) {
+                let strafeX = Math.cos(player.angle + Math.PI/2) * moveSpeed * 0.8;
+                let strafeY = Math.sin(player.angle + Math.PI/2) * moveSpeed * 0.8;
+                let newX = player.x + strafeX;
+                let newY = player.y + strafeY;
+                if (map[Math.floor(newY / TILE_SIZE)][Math.floor(newX / TILE_SIZE)] === 0) {
+                    player.x = newX;
+                    player.y = newY;
+                }
+            }
+        }
+
+        // ====================== DESENHO ======================
+        function draw() {
+            // Céu / Inferno
+            ctx.fillStyle = '#110000';
+            ctx.fillRect(0, 0, WIDTH, HEIGHT / 2);
+            // Chão
+            ctx.fillStyle = '#330000';
+            ctx.fillRect(0, HEIGHT / 2, WIDTH, HEIGHT / 2);
+
+            // Raycasting das paredes
+            for (let x = 0; x < WIDTH; x += 2) {  // passo de 2 para performance
+                let rayAngle = player.angle - 0.6 + (x / WIDTH) * 1.2;
+                let ray = castRay(rayAngle);
+                
+                let lineHeight = Math.floor(HEIGHT / (ray.dist * Math.cos(rayAngle - player.angle) || 1));
+                
+                // Escurecer com distância
+                let brightness = Math.max(30, 180 - ray.dist * 0.8);
+                ctx.strokeStyle = ray.side === 1 ? `rgb(${brightness}, 0, 0)` : `rgb(${brightness * 0.6}, 0, 0)`;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(x, HEIGHT / 2 - lineHeight / 2);
+                ctx.lineTo(x, HEIGHT / 2 + lineHeight / 2);
+                ctx.stroke();
+            }
+
+            // Inimigos (billboard sprites)
+            for (let enemy of enemies) {
+                if (!enemy.alive) continue;
+                
+                let dx = enemy.x - player.x;
+                let dy = enemy.y - player.y;
+                let dist = Math.sqrt(dx*dx + dy*dy);
+                let spriteAngle = Math.atan2(dy, dx) - player.angle;
+                
+                if (Math.abs(spriteAngle) > Math.PI) spriteAngle = spriteAngle - Math.sign(spriteAngle) * 2 * Math.PI;
+                
+                let screenX = WIDTH / 2 + (spriteAngle * (WIDTH / 1.8));
+                let spriteHeight = Math.floor(HEIGHT / dist * 28);
+                
+                if (screenX < -spriteHeight || screenX > WIDTH + spriteHeight) continue;
+                
+                ctx.fillStyle = '#ff0000';
+                ctx.fillRect(screenX - spriteHeight / 3, HEIGHT / 2 - spriteHeight / 2, spriteHeight / 1.5, spriteHeight);
+                
+                // Cabeça do demônio
+                ctx.fillStyle = '#ff6666';
+                ctx.fillRect(screenX - spriteHeight / 5, HEIGHT / 2 - spriteHeight / 1.6, spriteHeight / 2.5, spriteHeight / 3);
+            }
+
+            // Partículas de sangue
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = '#ff0000';
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life--;
+                p.vx *= 0.96;
+                p.vy *= 0.96;
+                
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+                
+                let alpha = p.life / 35;
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+            }
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0;
+
+            // Arma (pistola do diabo) - balança com o movimento
+            let bob = Math.sin(Date.now() / 120) * 6;
+            ctx.fillStyle = '#111111';
+            ctx.fillRect(WIDTH - 380, HEIGHT - 220 + bob, 320, 220);           // corpo da arma
+            ctx.fillStyle = '#ff2222';
+            ctx.fillRect(WIDTH - 340, HEIGHT - 180 + bob, 80, 40);            // cano
+            ctx.fillStyle = '#880000';
+            ctx.fillRect(WIDTH - 320, HEIGHT - 150 + bob, 30, 80);            // cabo
         }
 
         function update() {
             if (gameState !== 'playing') return;
+            
+            updatePlayer();
 
-            // Movimento horizontal
-            player.velX = 0;
-            if (keys['a'] || keys['arrowleft']) player.velX = -player.speed;
-            if (keys['d'] || keys['arrowright']) player.velX = player.speed;
-
-            // Gravidade
-            player.velY += player.gravity;
-            if (player.velY > 18) player.velY = 18;
-
-            // Aplicar movimento X
-            player.x += player.velX;
-            handleHorizontalCollisions();
-
-            // Aplicar movimento Y
-            player.y += player.velY;
-            handleVerticalCollisions();
-
-            // Pulo
-            if ((keys['w'] || keys[' '] || keys['arrowup']) && player.jumpsLeft > 0) {
-                if (player.onGround || player.jumpsLeft === 2) {
-                    player.velY = player.jump;
-                    player.onGround = false;
-                    player.jumpsLeft--;
-                }
-            }
-
-            // Morte por espinhos
-            for (let spike of spikes) {
-                if (rectCollision(player, spike)) {
-                    die();
-                    return;
-                }
-            }
-
-            // Coletar item
-            if (!collectible.collected && rectCollision(player, collectible)) {
-                collectible.collected = true;
-            }
-
-            // Plataformas temporárias
-            for (let i = platforms.length - 1; i >= 0; i--) {
-                let p = platforms[i];
-                if (p.temp) {
-                    p.timer--;
-                    if (p.timer <= 0) platforms.splice(i, 1);
-                }
-            }
-        }
-
-        function handleHorizontalCollisions() {
-            for (let p of platforms) {
-                if (rectCollision(player, p)) {
-                    if (player.velX > 0) player.x = p.x - player.width;
-                    if (player.velX < 0) player.x = p.x + p.w;
-                }
-            }
-        }
-
-        function handleVerticalCollisions() {
-            player.onGround = false;
-            for (let p of platforms) {
-                if (rectCollision(player, p)) {
-                    if (player.velY > 0) {
-                        player.y = p.y - player.height;
-                        player.velY = 0;
-                        player.onGround = true;
-                        player.jumpsLeft = 2;
-                    } else if (player.velY < 0) {
-                        player.y = p.y + p.h;
-                        player.velY = 0;
+            // Inimigos atacam se muito perto
+            for (let enemy of enemies) {
+                if (!enemy.alive) continue;
+                let dx = enemy.x - player.x;
+                let dy = enemy.y - player.y;
+                let dist = Math.sqrt(dx*dx + dy*dy);
+                if (dist < 80) {
+                    health -= 0.6;
+                    healthEl.textContent = Math.floor(health);
+                    if (health <= 0) {
+                        die();
                     }
                 }
             }
+
+            // Desenho
+            ctx.clearRect(0, 0, WIDTH, HEIGHT);
+            draw();
         }
 
         function die() {
             deaths++;
-            deathCountEl.textContent = deaths;
             gameState = 'dead';
             gameOverScreen.style.display = 'block';
         }
 
-        function drawBackground() {
-            ctx.fillStyle = '#0a0a0a';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            // Linhas verticais vermelhas estilo Devil
-            ctx.strokeStyle = '#330000';
-            ctx.lineWidth = 3;
-            for (let x = 40; x < canvas.width; x += 85) {
-                ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, canvas.height);
-                ctx.stroke();
-            }
-        }
-
-        function draw() {
-            drawBackground();
-
-            // Plataformas
-            ctx.fillStyle = '#888888';
-            for (let p of platforms) {
-                if (p.temp) ctx.fillStyle = '#555555';
-                ctx.fillRect(p.x, p.y, p.w, p.h);
-                ctx.fillStyle = '#888888';
-            }
-
-            // Espinhos
-            ctx.fillStyle = '#aa0000';
-            for (let s of spikes) {
-                ctx.fillRect(s.x, s.y, s.w, s.h);
-                // pontas dos espinhos
-                ctx.fillStyle = '#ff4444';
-                ctx.beginPath();
-                ctx.moveTo(s.x, s.y + s.h);
-                ctx.lineTo(s.x + s.w/3, s.y);
-                ctx.lineTo(s.x + s.w*2/3, s.y + s.h);
-                ctx.lineTo(s.x + s.w, s.y + s.h);
-                ctx.fill();
-                ctx.fillStyle = '#aa0000';
-            }
-
-            // Chave / Colecionável
-            if (!collectible.collected) {
-                ctx.fillStyle = '#ffdd00';
-                ctx.fillRect(collectible.x, collectible.y, collectible.width, collectible.height);
-                ctx.fillStyle = '#bb9900';
-                ctx.fillRect(collectible.x + 8, collectible.y + 8, 12, 10);
-            }
-
-            // Jogador - Demônio Vermelho
-            ctx.fillStyle = '#ff2222';
-            ctx.fillRect(player.x, player.y, player.width, player.height);
-
-            // Chifres
-            ctx.fillStyle = '#ff8888';
-            ctx.beginPath();
-            ctx.moveTo(player.x + 6,  player.y + 8);
-            ctx.lineTo(player.x + 15, player.y - 6);
-            ctx.lineTo(player.x + 24, player.y + 8);
-            ctx.fill();
+        function resetGame() {
+            player.x = TILE_SIZE * 1.5;
+            player.y = TILE_SIZE * 1.5;
+            player.angle = 0;
+            health = 100;
+            kills = 0;
+            killsEl.textContent = '0';
+            healthEl.textContent = '100';
+            enemies.forEach(e => e.alive = true);
+            particles = [];
+            gameState = 'playing';
+            gameOverScreen.style.display = 'none';
         }
 
         function gameLoop() {
             update();
-            draw();
             requestAnimationFrame(gameLoop);
         }
 
-        // Iniciar o jogo
-        resetLevel();
+        // Iniciar
+        resetGame();
         gameLoop();
 
-        console.log("%cDEVIL PLATFORM carregado. Boa sorte, você vai precisar.", "color:#ff3333; font-size:16px");
+        console.log("%cDEVIL FPS carregado. Bem-vindo ao inferno.", "color:#ff2222; font-size:18px");
     </script>
 </body>
 </html>
